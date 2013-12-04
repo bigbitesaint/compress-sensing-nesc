@@ -1,0 +1,51 @@
+        atomic {
+          cfg->base_id = tmp->base_id;
+
+          if (tmp->data_itv_max >= tmp->data_itv_min) {
+            cfg->data_itv_min = tmp->data_itv_min;
+            cfg->data_itv_max = tmp->data_itv_max;
+          }
+
+          if (tmp->cfg_itv_max >= tmp->cfg_itv_min) {
+            cfg->cfg_itv_min = tmp->cfg_itv_min;
+            cfg->cfg_itv_max = tmp->cfg_itv_max;
+          }
+
+          cfg->state = tmp->state;
+          /*
+          if (cfg->state == SPLUG_ON_STATE)
+            call SPlugControl.powerOn();
+          else if (cfg->state == SPLUG_OFF_STATE)
+            call SPlugControl.powerOff();
+          */
+          cfg->channel = tmp->channel;
+          /*
+          if (cfg->channel != call CC2420Config.getChannel()) {
+            call CC2420Config.setChannel(cfg->channel);
+            call CC2420Config.sync();
+          }
+          */
+
+          cfg->rfpower = tmp->rfpower;
+          /*
+          if (cfg->rfpower != call CC2420Packet.getPower(&dataPkt)) {
+            call CC2420Packet.setPower(&dataPkt, cfg->rfpower);
+            call CC2420Packet.setPower(&cfgPkt, cfg->rfpower);
+          }
+          */
+          cfg->sample_reg = tmp->sample_reg;
+
+          cfg->reset = tmp->reset;
+          /*
+          if (cfg->reset == KMOTE_RESET_TRUE)
+            WDTCTL = 0;
+          */
+
+          cfg->ping = tmp->ping;
+          /*
+          if (cfg->ping == KMOTE_PING_TRUE) {
+            call CfgTimer.stop();
+            call CfgTimer.startOneShot(0);
+          }
+          */
+        }

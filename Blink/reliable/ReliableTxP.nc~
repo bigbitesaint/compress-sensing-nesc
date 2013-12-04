@@ -1,0 +1,123 @@
+#include "reliableradio.h"
+
+#define min(x, y) x < y ? x : y
+
+module ReliableTxP
+{
+  provides interface ReliableTx;
+
+  uses {
+    interface Leds;
+    interface AMSend as DataSend;
+    interface Packet as DataPacket;
+    interface Receive as AckReceive;
+    interface Timer<TMilli>;
+    /* interface Alarm<TMilli, uint16_t>; */
+    /* interface Random; */
+  }
+}
+implementation 
+{
+  message_t packet;
+  uint32_t start;
+  uint32_t stop;
+  uint16_t blkno;
+  uint16_t cookie;
+  uint16_t pktno;
+  uint16_t dropnum;
+  uint16_t* data; // Pointer to the first data
+  uint16_t len; // length of the data
+  uint8_t radioLocked;
+
+  task void send() {
+    uint16_t datalen = min(SAMPLE_NUM, len), i;
+    uint16_t pktlen = datalen * sizeof(uint16_t) + sizeof(reliable_msg_t);
+    reliable_msg_t *dataMsg = (reliable_msg_t *) call DataPacket.getPayload(&packet, pktlen);
+
+    dataMsg->nodeid = TOS_NODE_ID;
+    dataMsg->start = start;
+    dataMsg->stop = stop;
+    dataMsg->blkno = blkno;
+    dataMsg->cookie = cookie;
+    dataMsg->pktno = pktno;
+    dataMsg->dropnum = dropnum;
+    for (i = 0; i < datalen; i++)
+      dataMsg->data[i] = data[i];
+
+    // Potential infinite busy waiting loop
+    while (call DataSend.send(BASEID, &packet, pktlen) != SUCCESS) {}
+  }
+
+  command void ReliableTx.init() {
+    radioLocked = FALSE;
+    blkno = 0;
+    cookie = 1;
+  }
+
+  command void ReliableTx.send(uint16_t* _data, uint16_t _len, uint32_t _start, uint32_t _stop) {
+    if (radioLocked == FALSE) {
+      atomic radioLocked = TRUE;
+      call Leds.led2Toggle();
+      data = _data;
+      len = _len;
+      start = _start;
+      stop = _stop;
+      blkno++;
+      cookie *= 3;
+      pktno = 0;
+      dropnum = 0;
+      post send();
+    }
+  }
+
+  command bool ReliableTx.isSending() {
+    return (radioLocked == TRUE);
+  }
+
+  command void ReliableTx.cancel() {
+    call Timer.stop();
+    atomic radioLocked = FALSE;
+  }
+
+  event void DataSend.sendDone(message_t *msg, error_t error) {
+    call Timer.startOneShot(ACK_TIMEOUT);
+  }
+
+  event message_t *AckReceive.receive(message_t *pkt, void *payload, uint8_t _len) {
+    if (_len == sizeof(ack_msg_t)) {
+      ack_msg_t *ackMsg = payload;
+      if (ackMsg->cookie == cookie) {
+        atomic {
+          call Timer.stop();
+
+          // Finish sending the last pkt
+          if (len <= SAMPLE_NUM) {
+            radioLocked = FALSE;
+            signal ReliableTx.sendDone(dropnum);
+          }
+
+          // Prepare to send the next pkt
+          else {
+            data += SAMPLE_NUM;
+            len -= SAMPLE_NUM;
+            cookie *= 3;
+            pktno += 1;
+            post send();
+          }
+
+          call Leds.led1Toggle();
+        }
+      }
+    }
+
+    return pkt;
+  }
+
+  event void Timer.fired() {
+    dropnum += 1;
+    post send();
+    call Leds.led0Toggle();
+  }
+
+  /* async event void Alarm.fired() {} */
+}

@@ -1,0 +1,178 @@
+#include <math.h>
+#include "printfZ1.h"
+#include "compress_sensing.h"
+//#include "ziggurat/ziggurat.h"
+#include "box_muller/box_muller.h"
+
+module CompressSensingC {
+	provides interface Compressor;
+	uses interface Random;
+	uses interface LocalTime<TMilli>;
+	uses interface ParameterInit<uint16_t> as SeedInit;
+}
+
+implementation {
+	uint16_t psize;
+	uint16_t total_time=0;
+	uint16_t total_run=0;
+	ENTRY* buffer_ptr;
+
+
+#ifdef USE_GMATRIX
+	// for gaussian
+   float fn[128];
+   int kn[128];
+   float wn[128];
+#endif
+
+	
+
+	uint8_t csReady = 0;
+	void prepareCS()
+	{
+#ifdef USE_SMATRIX
+		uint16_t i;
+		// for binary
+		for (i=0;i<COMPRESS_SIZE; ++i)
+			rand_array[i] = i;
+#endif
+
+#ifdef USE_GMATRIX
+		// for ziggurate
+//   	r4_nor_setup ( kn, fn, wn );
+
+		// for box-muller
+		build_tlp();
+#endif
+
+		csReady=1;
+	}
+
+	command void Compressor.set(ENTRY* plaintext, uint16_t size)
+	{
+
+		memset(output_buffer, 0, COMPRESS_SIZE);
+		psize = size;
+		buffer_ptr = plaintext;
+
+		/* generate matrix*/
+		if (!csReady)
+		{
+			prepareCS();
+		}
+	}
+
+	command void Compressor.compress(uint16_t pos)
+	{
+		uint16_t i,j,r,t;
+		uint32_t start_time, end_time;
+#ifdef USE_GMATRIX
+	#if 0
+		uint32_t seed = 12345678;
+		uint16_t rv1, rv2;
+		float value;
+	#else
+		uint32_t seed = 12345678;
+		uint16_t rv1, rv2;
+		float value[2];
+	#endif
+#endif
+
+		if (!csReady)
+		{
+			printfz1("Still generating matrix...\n");
+			return;
+		}
+
+		start_time = call LocalTime.get();
+		memset(output_buffer, 0, sizeof(output_buffer));
+		call SeedInit.init(100);
+#ifdef USE_SMATRIX
+		// this is important for sparse matrix to keep the random number consistent
+		for (i=0;i<COMPRESS_SIZE; ++i)
+			rand_array[i] = i;
+#endif
+
+
+#ifdef USE_GMATRIX
+		r = 0;
+		t = 1 / sqrtf(COMPRESS_SIZE);
+		for (i=0; i<COMPRESS_SIZE; ++i)
+		{
+			for (j=0; j< psize ; ++j)
+			{
+				if (r == 0)
+				{
+					value[0] = call Random.rand32();
+					value[1] = call Random.rand32();
+					norm(0, t, &value[0], &value[1]);
+					r = 2;
+				}
+	#if 0
+				// this value is from mean=0, dev=1;
+				value = r4_nor ( &seed, kn, fn, wn , rv1, rv2);			
+				output_buffer[i] += (float)buffer_ptr[j] * value;
+	#elseif
+				output_buffer[i] += (float)buffer_ptr[j] * value[r];
+				r -= 1;
+	#endif
+			}
+			output_buffer[i] *= t;
+		}
+#endif
+
+
+#ifdef USE_BMATRIX
+		t = 1 / sqrtf(COMPRESS_SIZE);
+		for (i=0; i<COMPRESS_SIZE; ++i)
+		{
+			for (j=0; j< psize; ++j)
+			{
+				r = call Random.rand32();
+				if (r & 0x0001)
+					output_buffer[i] += buffer_ptr[j];
+				else
+					output_buffer[i] -= buffer_ptr[j];
+			}
+			output_buffer[i] *= t;
+		}
+#endif
+
+#ifdef USE_SMATRIX
+		for (i=0; i< psize ; ++i)
+		{
+			// determine random entry 
+			for (j=0; j<SPARSITY; ++j)
+			{
+				// permute 
+				r = call Random.rand32();
+				r %= (COMPRESS_SIZE-j);
+				r += j;
+
+				// swap 
+				t = rand_array[j];
+				rand_array[j] = rand_array[r];
+				rand_array[r] = t;
+
+				// sum 
+				output_buffer[ rand_array[j] ] += buffer_ptr[ i ];
+
+				printfz1("%d ", rand_array[j]);
+			}
+		}
+		printfz1("\n");
+#endif
+
+		end_time = call LocalTime.get();
+		printfz1("Compression: %lu ms\n", end_time-start_time);
+		total_time += end_time - start_time;
+		total_run ++;
+		signal Compressor.complete(COMPRESS_SIZE);
+	}
+
+	command void Compressor.summarize()
+	{
+		printfz1("Average Time: %u/%u\n", total_time, total_run);
+	}
+
+}
