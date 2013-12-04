@@ -4,7 +4,7 @@
 #include "reliableradio.h"
 #include "calib.h"
 
-module CSC @safe() {
+module CSC() {
   uses interface Leds;
   uses interface Boot;
   uses interface Random;
